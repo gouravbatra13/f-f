@@ -20,6 +20,12 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Local API configuration
+
+Copy `.env.example` to `.env.local` to configure the NestJS API base URL. The
+default is `http://localhost:3001/api/v1`; start the API separately from its
+`fixflow-api` directory. `.env.local` is ignored by git.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

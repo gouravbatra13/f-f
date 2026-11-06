@@ -31,6 +31,30 @@
 $ npm install
 ```
 
+## Local API configuration
+
+Copy `.env.example` to `.env` before starting the API. The defaults run the API
+on port `3001`, expose routes under `/api/v1`, and allow the local Next.js
+frontend at `http://localhost:3000`. Update `WEB_ORIGIN` if the frontend uses a
+different local origin. Keep `.env` local; only `.env.example` belongs in git.
+
+The MySQL service is defined in the repository-root `docker-compose.yml`. From
+the repository root, start it with:
+
+```bash
+docker compose --env-file fixflow-api/.env -p fixflow-ai up -d mysql
+```
+
+The sample credentials are for local development only. TypeORM schema
+synchronization is disabled; schema changes are applied through migrations.
+Use `npm run migration:show`, `npm run migration:run`, and
+`npm run migration:revert` from `fixflow-api`. Generate a migration after
+building entities with:
+
+```bash
+npm run migration:generate -- src/database/migrations/DescribeYourChange -d dist/database/data-source.js
+```
+
 ## Compile and run the project
 
 ```bash

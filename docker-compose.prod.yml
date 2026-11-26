@@ -1,0 +1,200 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env.production}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env.production}
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+    secrets:
+      - mysql_app_password
+      - mysql_root_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping --host=127.0.0.1 --user=root --password="$$(cat /run/secrets/mysql_root_password)" --silent
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    mem_limit: 1g
+    init: true
+    networks:
+      - backend
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$(cat /run/secrets/redis_password)"
+    secrets:
+      - redis_password
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli ping | grep -q PONG
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    init: true
+    networks:
+      - backend
+
+  migrate:
+    image: ${API_IMAGE:-fixflow-ai-api:local}
+    build:
+      context: ./fixflow-api
+      target: production
+    profiles: ["migrate"]
+    command:
+      - node
+      - ./node_modules/typeorm/cli.js
+      - migration:run
+      - -d
+      - ./dist/database/data-source.js
+    environment:
+      NODE_ENV: production
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env.production}
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env.production}
+    secrets:
+      - mysql_app_password
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - backend
+
+  api:
+    image: ${API_IMAGE:-fixflow-ai-api:local}
+    build:
+      context: ./fixflow-api
+      target: production
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      API_PREFIX: ${API_PREFIX:-api/v1}
+      WEB_ORIGIN: ${WEB_ORIGIN:?Set WEB_ORIGIN in .env.production}
+      COOKIE_SECURE: "true"
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env.production}
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env.production}
+      MYSQL_POOL_SIZE: ${MYSQL_POOL_SIZE:-10}
+      ACCESS_TOKEN_SECRET_FILE: /run/secrets/access_token_secret
+      ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS:-900}
+      REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-2592000}
+      AI_SERVICE_URL: ""
+      QUEUE_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REDIS_DB: ${REDIS_DB:-0}
+      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-2}
+      METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-coder:latest}
+    secrets:
+      - mysql_app_password
+      - access_token_secret
+      - redis_password
+      - metrics_token
+    ports:
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_HOST_PORT:-3001}:3001"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3001/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    stop_grace_period: 30s
+    mem_limit: 768m
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - frontend
+      - backend
+
+  web:
+    image: ${WEB_IMAGE:-fixflow-ai-web:local}
+    build:
+      context: ./fixflow-web
+      target: production
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?Set NEXT_PUBLIC_API_BASE_URL in .env.production}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_HOST_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 30s
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - frontend
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  frontend:
+  backend:
+    internal: true
+
+secrets:
+  mysql_root_password:
+    file: ${MYSQL_ROOT_PASSWORD_FILE:-./secrets/mysql_root_password}
+  mysql_app_password:
+    file: ${MYSQL_PASSWORD_FILE:-./secrets/mysql_app_password}
+  redis_password:
+    file: ${REDIS_PASSWORD_FILE:-./secrets/redis_password}
+  access_token_secret:
+    file: ${ACCESS_TOKEN_SECRET_FILE:-./secrets/access_token_secret}
+  metrics_token:
+    file: ${METRICS_TOKEN_FILE:-./secrets/metrics_token}

@@ -1,0 +1,61 @@
+services:
+  api:
+    environment:
+      AI_SERVICE_URL: http://ai-service:8000
+      AI_SERVICE_TOKEN_FILE: /run/secrets/ai_service_token
+    secrets:
+      - ai_service_token
+
+  ai-service:
+    image: ${AI_IMAGE:-fixflow-ai-service:local}
+    build:
+      context: ./fixflow-ai-service
+      target: production
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      AI_SERVICE_TOKEN_FILE: /run/secrets/ai_service_token
+      AI_CHROMA_PATH: /data/chroma
+      AI_EMBEDDING_PROVIDER: ${AI_EMBEDDING_PROVIDER:-ollama}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-nomic-embed-text:latest}
+      AI_EMBEDDING_DEVICE: cpu
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-coder:latest}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-90}
+      METRICS_TOKEN_FILE: /run/secrets/metrics_token
+    secrets:
+      - ai_service_token
+      - metrics_token
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ai_chroma_data:/data/chroma
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    stop_grace_period: 30s
+    mem_limit: 2g
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+volumes:
+  ai_chroma_data:
+
+secrets:
+  ai_service_token:
+    file: ${AI_SERVICE_TOKEN_FILE:-./secrets/ai_service_token}

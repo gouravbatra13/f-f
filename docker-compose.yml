@@ -8,7 +8,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in fixflow-api/.env}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in fixflow-api/.env}
     ports:
-      - "${MYSQL_HOST_PORT:-33306}:3306"
+      - "127.0.0.1:${MYSQL_HOST_PORT:-33316}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -18,6 +18,164 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+      start_period: 30s
+    mem_limit: 1g
+    init: true
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-local-redis-placeholder}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    init: true
+
+  api:
+    build:
+      context: ./fixflow-api
+      target: development
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      API_PREFIX: ${API_PREFIX:-api/v1}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in fixflow-api/.env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in fixflow-api/.env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in fixflow-api/.env}
+      MYSQL_POOL_SIZE: ${MYSQL_POOL_SIZE:-10}
+      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET:?Set ACCESS_TOKEN_SECRET in fixflow-api/.env}
+      ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS:-900}
+      REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-2592000}
+      COOKIE_SECURE: "false"
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-}
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-}
+      AI_REQUEST_TIMEOUT_MS: ${AI_REQUEST_TIMEOUT_MS:-120000}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-coder:latest}
+      QUEUE_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-local-redis-placeholder}
+      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-2}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-3001}:3001"
+    volumes:
+      - ./fixflow-api/src:/app/src
+      - ./fixflow-api/test:/app/test
+      - api_node_modules:/app/node_modules
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3001/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    stop_grace_period: 30s
+    mem_limit: 768m
+
+  web:
+    build:
+      context: ./fixflow-web
+      target: development
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001/api/v1}
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001/api/v1}
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-3000}:3000"
+    volumes:
+      - ./fixflow-web/src:/app/src
+      - ./fixflow-web/public:/app/public
+      - web_node_modules:/app/node_modules
+      - web_next:/app/.next
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    stop_grace_period: 30s
+    mem_limit: 512m
+
+  ai-service:
+    profiles: ["ai"]
+    build:
+      context: ./fixflow-ai-service
+      target: development
+    restart: unless-stopped
+    init: true
+    environment:
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-}
+      AI_CHROMA_PATH: /data/chroma
+      AI_EMBEDDING_PROVIDER: ${AI_EMBEDDING_PROVIDER:-sentence-transformers}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      AI_EMBEDDING_DEVICE: ${AI_EMBEDDING_DEVICE:-cpu}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-coder:latest}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-90}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+    ports:
+      - "127.0.0.1:${AI_SERVICE_HOST_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./fixflow-ai-service/app:/app/app
+      - ai_chroma_data:/data/chroma
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    stop_grace_period: 30s
+    mem_limit: 2g
 
 volumes:
   mysql_data:
+  redis_data:
+  ai_chroma_data:
+  api_node_modules:
+  web_node_modules:
+  web_next:

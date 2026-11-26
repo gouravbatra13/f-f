@@ -23,8 +23,13 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     if (!(exception instanceof HttpException)) {
       this.logger.error(
-        'Unhandled exception',
-        exception instanceof Error ? exception.stack : undefined,
+        JSON.stringify({
+          message: 'Unhandled exception',
+          requestId: request.header('x-request-id') ?? null,
+          statusCode: status,
+          errorType:
+            exception instanceof Error ? exception.name : 'UnknownError',
+        }),
       );
     }
 
@@ -34,6 +39,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
       message: this.getMessage(exception),
       timestamp: new Date().toISOString(),
       path: request.path,
+      requestId: request.header('x-request-id') ?? null,
     });
   }
 

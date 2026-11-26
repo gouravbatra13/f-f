@@ -55,6 +55,19 @@ building entities with:
 npm run migration:generate -- src/database/migrations/DescribeYourChange -d dist/database/data-source.js
 ```
 
+Authentication configuration includes `ACCESS_TOKEN_SECRET`,
+`ACCESS_TOKEN_TTL_SECONDS`, `REFRESH_TOKEN_TTL_SECONDS`, and `COOKIE_SECURE`.
+The access-token secret must contain at least 32 bytes. For production, use a
+secret manager and set `COOKIE_SECURE=true`; never use the example secret.
+New users receive the `developer` platform role. Registration passwords must
+be at least 12 characters with uppercase/lowercase letters, a number, and a
+special character. Refresh tokens rotate per device family; replay revokes
+that family while preserving other devices. `POST /auth/logout` revokes all
+account sessions.
+Authentication routes, request/response shapes, cookie behavior, and error
+codes are documented in the repository-root [API_DOCUMENTATION.md](../API_DOCUMENTATION.md)
+and [SETUP_GUIDE.md](../SETUP_GUIDE.md).
+
 ## Compile and run the project
 
 ```bash

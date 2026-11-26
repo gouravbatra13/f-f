@@ -1,4 +1,8 @@
 import { getDatabaseConfig } from './database.config.js';
+import { getAuthConfig } from './auth.config.js';
+import { getAiConfig } from './ai.config.js';
+import { getQueueConfig } from './queue.config.js';
+import { getSecret } from './secret.js';
 
 function parsePort(value: string | undefined): number {
   if (value === undefined || value === '') {
@@ -47,4 +51,8 @@ export default () => ({
   apiPrefix: parseApiPrefix(process.env.API_PREFIX),
   webOrigin: parseWebOrigin(process.env.WEB_ORIGIN),
   database: getDatabaseConfig(),
+  auth: getAuthConfig(),
+  ai: getAiConfig(),
+  queue: getQueueConfig(),
+  metrics: { token: getSecret(process.env, 'METRICS_TOKEN') ?? null },
 });

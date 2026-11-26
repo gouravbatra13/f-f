@@ -16,6 +16,10 @@ export function createDataSourceOptions(
     migrations: [join(databaseDirectory, 'migrations', '*.js')],
     synchronize: false,
     migrationsRun: false,
+    extra: {
+      connectionLimit: database.connectionLimit,
+      connectTimeout: 10_000,
+    },
   };
 }
 
